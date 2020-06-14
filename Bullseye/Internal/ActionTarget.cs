@@ -15,7 +15,7 @@ namespace Bullseye.Internal
 
         public override async Task RunAsync(bool dryRun, bool parallel, Logger log, Func<Exception, bool> messageOnly)
         {
-            await log.Starting(this.Name).Tax();
+            await log.Starting(this).Tax();
 
             var stopWatch = Stopwatch.StartNew();
 
@@ -31,15 +31,15 @@ namespace Bullseye.Internal
                 {
                     if (!messageOnly(ex))
                     {
-                        await log.Error(this.Name, ex).Tax();
+                        await log.Error(this, ex).Tax();
                     }
 
-                    await log.Failed(this.Name, ex, stopWatch.Elapsed).Tax();
+                    await log.Failed(this, ex, stopWatch.Elapsed).Tax();
                     throw new TargetFailedException($"Target '{this.Name}' failed.", ex);
                 }
             }
 
-            await log.Succeeded(this.Name, stopWatch.Elapsed).Tax();
+            await log.Succeeded(this, stopWatch.Elapsed).Tax();
         }
     }
 }

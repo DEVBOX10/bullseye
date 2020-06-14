@@ -35,11 +35,11 @@ namespace Bullseye.Internal
             var inputsList = this.inputs.ToList();
             if (inputsList.Count == 0)
             {
-                await log.NoInputs(this.Name).Tax();
+                await log.NoInputs(this).Tax();
                 return;
             }
 
-            await log.Starting(this.Name).Tax();
+            await log.Starting(this).Tax();
             var stopWatch = Stopwatch.StartNew();
 
             try
@@ -59,17 +59,17 @@ namespace Bullseye.Internal
             }
             catch (Exception)
             {
-                await log.Failed(this.Name, stopWatch.Elapsed).Tax();
+                await log.Failed(this, stopWatch.Elapsed).Tax();
                 throw;
             }
 
-            await log.Succeeded(this.Name, stopWatch.Elapsed).Tax();
+            await log.Succeeded(this, stopWatch.Elapsed).Tax();
         }
 
         private async Task InvokeAsync(TInput input, bool dryRun, Logger log, Func<Exception, bool> messageOnly)
         {
             var id = Guid.NewGuid();
-            await log.Starting(this.Name, input, id).Tax();
+            await log.Starting(this, input, id).Tax();
             var stopWatch = Stopwatch.StartNew();
 
             if (!dryRun && this.action != null)
@@ -84,15 +84,15 @@ namespace Bullseye.Internal
                 {
                     if (!messageOnly(ex))
                     {
-                        await log.Error(this.Name, input, ex).Tax();
+                        await log.Error(this, input, ex).Tax();
                     }
 
-                    await log.Failed(this.Name, input, ex, stopWatch.Elapsed, id).Tax();
+                    await log.Failed(this, input, ex, stopWatch.Elapsed, id).Tax();
                     throw new TargetFailedException($"Target '{this.Name}' failed with input '{input}'.", ex);
                 }
             }
 
-            await log.Succeeded(this.Name, input, stopWatch.Elapsed, id).Tax();
+            await log.Succeeded(this, input, stopWatch.Elapsed, id).Tax();
         }
     }
 }

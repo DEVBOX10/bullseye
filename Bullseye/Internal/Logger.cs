@@ -82,17 +82,24 @@ namespace Bullseye.Internal
             await this.writer.WriteLineAsync(Message(p.Succeeded, $"Succeeded.", targets, duration)).Tax();
         }
 
-        public Task Starting(string target)
+        public Task Starting(ActionTarget target)
         {
             InternResult(target);
 
             return this.writer.WriteLineAsync(Message(p.Default, "Starting...", target, null));
         }
 
-        public Task Error(string target, Exception ex) =>
+        public Task Starting<TInput>(ActionTarget<TInput> target)
+        {
+            InternResult(target);
+
+            return this.writer.WriteLineAsync(Message(p.Default, "Starting...", target, null));
+        }
+
+        public Task Error(ActionTarget target, Exception ex) =>
             this.writer.WriteLineAsync(Message(p.Failed, ex.ToString(), target));
 
-        public Task Failed(string target, Exception ex, TimeSpan duration)
+        public Task Failed(ActionTarget target, Exception ex, TimeSpan duration)
         {
             var result = InternResult(target);
             result.Outcome = TargetOutcome.Failed;
@@ -101,7 +108,7 @@ namespace Bullseye.Internal
             return this.writer.WriteLineAsync(Message(p.Failed, $"Failed! {ex.Message}", target, duration));
         }
 
-        public Task Failed(string target, TimeSpan duration)
+        public Task Failed<TInput>(ActionTarget<TInput> target, TimeSpan duration)
         {
             var result = InternResult(target);
             result.Outcome = TargetOutcome.Failed;
@@ -110,7 +117,15 @@ namespace Bullseye.Internal
             return this.writer.WriteLineAsync(Message(p.Failed, $"Failed!", target, duration));
         }
 
-        public Task Succeeded(string target, TimeSpan? duration)
+        public Task Succeeded(Target target)
+        {
+            var result = InternResult(target);
+            result.Outcome = TargetOutcome.Succeeded;
+
+            return this.writer.WriteLineAsync(Message(p.Succeeded, "Succeeded.", target));
+        }
+
+        public Task Succeeded(ActionTarget target, TimeSpan duration)
         {
             var result = InternResult(target);
             result.Outcome = TargetOutcome.Succeeded;
@@ -119,7 +134,16 @@ namespace Bullseye.Internal
             return this.writer.WriteLineAsync(Message(p.Succeeded, "Succeeded.", target, duration));
         }
 
-        public Task Starting<TInput>(string target, TInput input, Guid inputId)
+        public Task Succeeded<TInput>(ActionTarget<TInput> target, TimeSpan duration)
+        {
+            var result = InternResult(target);
+            result.Outcome = TargetOutcome.Succeeded;
+            result.Duration = duration;
+
+            return this.writer.WriteLineAsync(Message(p.Succeeded, "Succeeded.", target, duration));
+        }
+
+        public Task Starting<TInput>(ActionTarget<TInput> target, TInput input, Guid inputId)
         {
             var result = Intern(target, inputId);
             result.Input = input;
@@ -127,10 +151,10 @@ namespace Bullseye.Internal
             return this.writer.WriteLineAsync(MessageWithInput(p.Default, "Starting...", target, input, null));
         }
 
-        public Task Error<TInput>(string target, TInput input, Exception ex) =>
+        public Task Error<TInput>(ActionTarget<TInput> target, TInput input, Exception ex) =>
             this.writer.WriteLineAsync(MessageWithInput(p.Failed, ex.ToString(), target, input));
 
-        public Task Failed<TInput>(string target, TInput input, Exception ex, TimeSpan duration, Guid inputId)
+        public Task Failed<TInput>(ActionTarget<TInput> target, TInput input, Exception ex, TimeSpan duration, Guid inputId)
         {
             var result = Intern(target, inputId);
             result.Input = input;
@@ -140,7 +164,7 @@ namespace Bullseye.Internal
             return this.writer.WriteLineAsync(MessageWithInput(p.Failed, $"Failed! {ex.Message}", target, input, duration));
         }
 
-        public Task Succeeded<TInput>(string target, TInput input, TimeSpan duration, Guid inputId)
+        public Task Succeeded<TInput>(ActionTarget<TInput> target, TInput input, TimeSpan duration, Guid inputId)
         {
             var result = Intern(target, inputId);
             result.Input = input;
@@ -150,16 +174,16 @@ namespace Bullseye.Internal
             return this.writer.WriteLineAsync(MessageWithInput(p.Succeeded, "Succeeded.", target, input, duration));
         }
 
-        public Task NoInputs(string target)
+        public Task NoInputs<TInput>(ActionTarget<TInput> target)
         {
             InternResult(target).Outcome = TargetOutcome.NoInputs;
 
             return this.writer.WriteLineAsync(Message(p.Warning, "No inputs!", target, null));
         }
 
-        private TargetResult InternResult(string target) => this.results.GetOrAdd(target, key => new TargetResult(Interlocked.Increment(ref this.resultOrdinal)));
+        private TargetResult InternResult(Target target) => this.results.GetOrAdd(target.Name, key => new TargetResult(Interlocked.Increment(ref this.resultOrdinal)));
 
-        private TargetInputResult Intern(string target, Guid inputId) =>
+        private TargetInputResult Intern(Target target, Guid inputId) =>
             InternResult(target).InputResults.GetOrAdd(inputId, key => new TargetInputResult(Interlocked.Increment(ref this.resultOrdinal)));
 
         private async Task Results()
@@ -257,16 +281,16 @@ namespace Bullseye.Internal
         private string Message(string color, string text, List<string> targets, TimeSpan? duration) =>
             $"{GetPrefix()}{color}{text}{p.Reset} {p.Target}({targets.Spaced()}){p.Reset}{GetSuffix(false, duration)}{p.Reset}";
 
-        private string Message(string color, string text, string target) =>
+        private string Message(string color, string text, Target target) =>
             $"{GetPrefix(target)}{color}{text}{p.Reset}";
 
-        private string Message(string color, string text, string target, TimeSpan? duration) =>
+        private string Message(string color, string text, Target target, TimeSpan? duration) =>
             $"{GetPrefix(target)}{color}{text}{p.Reset}{GetSuffix(true, duration)}{p.Reset}";
 
-        private string MessageWithInput<TInput>(string color, string text, string target, TInput input) =>
+        private string MessageWithInput<TInput>(string color, string text, Target target, TInput input) =>
             $"{GetPrefix(target, input)}{color}{text}{p.Reset}";
 
-        private string MessageWithInput<TInput>(string color, string text, string target, TInput input, TimeSpan? duration) =>
+        private string MessageWithInput<TInput>(string color, string text, Target target, TInput input, TimeSpan? duration) =>
             $"{GetPrefix(target, input)}{color}{text}{p.Reset}{GetSuffix(true, duration)}{p.Reset}";
 
         private string GetPrefix() =>
@@ -275,11 +299,11 @@ namespace Bullseye.Internal
         private string GetPrefix(Stack<string> targets) =>
             $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{string.Join($"{p.Default}/{p.Target}", targets.Reverse())}{p.Default}:{p.Reset} ";
 
-        private string GetPrefix(string target) =>
-            $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{target}{p.Default}:{p.Reset} ";
+        private string GetPrefix(Target target) =>
+            $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{target.Name}{p.Default}:{p.Reset} ";
 
-        private string GetPrefix<TInput>(string target, TInput input) =>
-            $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{target}{p.Default}/{p.Input}{input}{p.Default}:{p.Reset} ";
+        private string GetPrefix<TInput>(Target target, TInput input) =>
+            $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{target.Name}{p.Default}/{p.Input}{input}{p.Default}:{p.Reset} ";
 
         private string GetSuffix(bool specific, TimeSpan? duration) =>
             (!specific && this.dryRun ? $" {p.Option}(dry run){p.Reset}" : "") +
