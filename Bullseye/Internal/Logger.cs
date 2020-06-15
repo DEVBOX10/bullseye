@@ -15,6 +15,7 @@ namespace Bullseye.Internal
     public class Logger
     {
         private readonly ConcurrentDictionary<string, TargetState> states = new ConcurrentDictionary<string, TargetState>();
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, InputState>> inputStates = new ConcurrentDictionary<string, ConcurrentDictionary<Guid, InputState>>();
         private readonly TextWriter writer;
         private readonly string prefix;
         private readonly bool skipDependencies;
@@ -68,167 +69,113 @@ namespace Bullseye.Internal
         }
 
         public Task Starting(List<string> targets) =>
-            this.writer.WriteLineAsync(Message(p.Default, $"Starting...", targets, null));
+            this.writer.WriteLineAsync(Message(GetText(TargetStatus.Starting), targets, null));
 
         public async Task Failed(List<string> targets, TimeSpan duration)
         {
             await this.WriteSummary().Tax();
-            await this.writer.WriteLineAsync(Message(p.Failed, $"Failed!", targets, duration)).Tax();
+            await this.writer.WriteLineAsync(Message(GetText(TargetStatus.Failed), targets, duration)).Tax();
         }
 
         public async Task Succeeded(List<string> targets, TimeSpan duration)
         {
             await this.WriteSummary().Tax();
-            await this.writer.WriteLineAsync(Message(p.Succeeded, $"Succeeded.", targets, duration)).Tax();
+            await this.writer.WriteLineAsync(Message(GetText(TargetStatus.Succeeded), targets, duration)).Tax();
         }
 
-        public Task Succeeded(Target target)
-        {
-            var state = Intern(target);
-            state.Status = TargetStatus.Succeeded;
+        public Task Succeeded(Target target) =>
+            this.writer.WriteLineAsync(Message(Record(target, TargetStatus.Succeeded)));
 
-            return this.writer.WriteLineAsync(Message(p.Succeeded, "Succeeded.", target));
-        }
-
-        public Task Starting(ActionTarget target)
-        {
-            Intern(target);
-
-            return this.writer.WriteLineAsync(Message(p.Default, "Starting...", target, null));
-        }
+        public Task Starting(ActionTarget target) =>
+            this.writer.WriteLineAsync(Message(Record(target, TargetStatus.Starting)));
 
         public Task Error(ActionTarget target, Exception ex) =>
-            this.writer.WriteLineAsync(Message(p.Failed, ex.ToString(), target));
+            this.writer.WriteLineAsync(Message(target, ex));
 
-        public Task Failed(ActionTarget target, Exception ex, TimeSpan duration)
-        {
-            var state = Intern(target);
-            state.Status = TargetStatus.Failed;
-            state.Duration = duration;
+        public Task Failed(ActionTarget target, Exception ex, TimeSpan duration) =>
+            this.writer.WriteLineAsync(Message(Record(target, TargetStatus.Failed, ex, duration)));
 
-            return this.writer.WriteLineAsync(Message(p.Failed, $"Failed! {ex.Message}", target, duration));
-        }
+        public Task Succeeded(ActionTarget target, TimeSpan duration) =>
+            this.writer.WriteLineAsync(Message(Record(target, TargetStatus.Succeeded, duration: duration)));
 
-        public Task Succeeded(ActionTarget target, TimeSpan duration)
-        {
-            var state = Intern(target);
-            state.Status = TargetStatus.Succeeded;
-            state.Duration = duration;
+        public Task NoInputs<TInput>(ActionTarget<TInput> target) =>
+            this.writer.WriteLineAsync(Message(Record(target, TargetStatus.NoInputs)));
 
-            return this.writer.WriteLineAsync(Message(p.Succeeded, "Succeeded.", target, duration));
-        }
+        public Task Starting<TInput>(ActionTarget<TInput> target) =>
+            this.writer.WriteLineAsync(Message(Record(target, TargetStatus.Starting)));
 
-        public Task NoInputs<TInput>(ActionTarget<TInput> target)
-        {
-            Intern(target).Status = TargetStatus.NoInputs;
+        public Task Failed<TInput>(ActionTarget<TInput> target, TimeSpan duration) =>
+            this.writer.WriteLineAsync(Message(Record(target, TargetStatus.Failed, duration: duration)));
 
-            return this.writer.WriteLineAsync(Message(p.Warning, "No inputs!", target, null));
-        }
+        public Task Succeeded<TInput>(ActionTarget<TInput> target, TimeSpan duration) =>
+            this.writer.WriteLineAsync(Message(Record(target, TargetStatus.Succeeded, duration: duration)));
 
-        public Task Starting<TInput>(ActionTarget<TInput> target)
-        {
-            Intern(target);
-
-            return this.writer.WriteLineAsync(Message(p.Default, "Starting...", target, null));
-        }
-
-        public Task Failed<TInput>(ActionTarget<TInput> target, TimeSpan duration)
-        {
-            var state = Intern(target);
-            state.Status = TargetStatus.Failed;
-            state.Duration = duration;
-
-            return this.writer.WriteLineAsync(Message(p.Failed, $"Failed!", target, duration));
-        }
-
-        public Task Succeeded<TInput>(ActionTarget<TInput> target, TimeSpan duration)
-        {
-            var state = Intern(target);
-            state.Status = TargetStatus.Succeeded;
-            state.Duration = duration;
-
-            return this.writer.WriteLineAsync(Message(p.Succeeded, "Succeeded.", target, duration));
-        }
-
-        public Task Starting<TInput>(ActionTarget<TInput> target, TInput input, Guid inputId)
-        {
-            var state = Intern(target, inputId);
-            state.Input = input;
-
-            return this.writer.WriteLineAsync(MessageWithInput(p.Default, "Starting...", target, input, null));
-        }
+        public Task Starting<TInput>(ActionTarget<TInput> target, TInput input, Guid inputId) =>
+            this.writer.WriteLineAsync(Message(Record(target, inputId, input, InputStatus.Starting)));
 
         public Task Error<TInput>(ActionTarget<TInput> target, TInput input, Exception ex) =>
-            this.writer.WriteLineAsync(MessageWithInput(p.Failed, ex.ToString(), target, input));
+            this.writer.WriteLineAsync(Message(target, input, ex));
 
-        public Task Failed<TInput>(ActionTarget<TInput> target, TInput input, Exception ex, TimeSpan duration, Guid inputId)
-        {
-            var state = Intern(target, inputId);
-            state.Input = input;
-            state.Status = InputStatus.Failed;
-            state.Duration = duration;
+        public Task Failed<TInput>(ActionTarget<TInput> target, TInput input, Exception ex, TimeSpan duration, Guid inputId) =>
+            this.writer.WriteLineAsync(Message(Record(target, inputId, input, InputStatus.Failed, ex, duration)));
 
-            return this.writer.WriteLineAsync(MessageWithInput(p.Failed, $"Failed! {ex.Message}", target, input, duration));
-        }
+        public Task Succeeded<TInput>(ActionTarget<TInput> target, TInput input, TimeSpan duration, Guid inputId) =>
+            this.writer.WriteLineAsync(Message(Record(target, inputId, input, InputStatus.Succeeded, duration: duration)));
 
-        public Task Succeeded<TInput>(ActionTarget<TInput> target, TInput input, TimeSpan duration, Guid inputId)
-        {
-            var state = Intern(target, inputId);
-            state.Input = input;
-            state.Status = InputStatus.Succeeded;
-            state.Duration = duration;
+        private TargetState Record(Target target, TargetStatus status, Exception ex = null, TimeSpan? duration = null) =>
+            this.states.AddOrUpdate(
+                target.Name,
+                name => new TargetState(name, status, ex, duration, Interlocked.Increment(ref this.stateOrdinal)),
+                (name, current) => new TargetState(name, status, ex, duration, current.Ordinal));
 
-            return this.writer.WriteLineAsync(MessageWithInput(p.Succeeded, "Succeeded.", target, input, duration));
-        }
+        private InputState Record(Target target, Guid inputId, object input, InputStatus status, Exception ex = null, TimeSpan? duration = null) =>
+            InternInputStates(target.Name).AddOrUpdate(
+                inputId,
+                _ => new InputState(target.Name, input, status, ex, duration, Interlocked.Increment(ref this.stateOrdinal)),
+                (_, current) => new InputState(target.Name, input, status, ex, duration, current.Ordinal));
 
-        private TargetState Intern(Target target) => this.states.GetOrAdd(target.Name, key => new TargetState(Interlocked.Increment(ref this.stateOrdinal)));
-
-        private InputState Intern(Target target, Guid inputId) =>
-            Intern(target).InputStates.GetOrAdd(inputId, key => new InputState(Interlocked.Increment(ref this.stateOrdinal)));
+        private ConcurrentDictionary<Guid, InputState> InternInputStates(string target) =>
+            inputStates.GetOrAdd(target, _ => new ConcurrentDictionary<Guid, InputState>());
 
         private async Task WriteSummary()
         {
             // whitespace (e.g. can change to '·' for debugging)
             var ws = ' ';
 
-            var totalDuration = states.Aggregate(
+            var totalDuration = states.Values.Aggregate(
                 TimeSpan.Zero,
                 (total, state) =>
                     total +
-                    (state.Value.Duration ?? state.Value.InputStates.Values.Aggregate(TimeSpan.Zero, (inputTotal, input) => inputTotal + input.Duration)));
+                    (state.Duration ?? InternInputStates(state.Name).Values.Aggregate(TimeSpan.Zero, (inputTotal, input) => inputTotal + input.Duration ?? TimeSpan.Zero)));
 
             var rows = new List<SummaryRow> { new SummaryRow { TargetOrInput = $"{p.Default}Target{p.Reset}", Outcome = $"{p.Default}Outcome{p.Reset}", Duration = $"{p.Default}Duration{p.Reset}", Percentage = "" } };
 
-            foreach (var state in states.OrderBy(state => state.Value.Ordinal))
+            foreach (var state in states.Values.OrderBy(state => state.Ordinal))
             {
-                var target = $"{p.Target}{state.Key}{p.Reset}";
+                var target = $"{p.Target}{state.Name}{p.Reset}";
 
-                var outcome = state.Value.Status == TargetStatus.Failed
-                    ? $"{p.Failed}Failed!{p.Reset}"
-                    : state.Value.Status == TargetStatus.NoInputs
-                        ? $"{p.Warning}No inputs!{p.Reset}"
-                        : $"{p.Succeeded}Succeeded{p.Reset}";
+                var outcome = GetText(state.Status);
 
-                var duration = $"{p.Timing}{state.Value.Duration.Humanize(true)}{p.Reset}";
+                var duration = $"{p.Timing}{state.Duration.Humanize(true)}{p.Reset}";
 
-                var percentage = state.Value.Duration.HasValue && totalDuration > TimeSpan.Zero
-                    ? $"{p.Timing}{100 * state.Value.Duration.Value.TotalMilliseconds / totalDuration.TotalMilliseconds:N1}%{p.Reset}"
+                var percentage = state.Duration.HasValue && totalDuration > TimeSpan.Zero
+                    ? $"{p.Timing}{100 * state.Duration.Value.TotalMilliseconds / totalDuration.TotalMilliseconds:N1}%{p.Reset}"
                     : "";
 
                 rows.Add(new SummaryRow { TargetOrInput = target, Outcome = outcome, Duration = duration, Percentage = percentage });
 
                 var index = 0;
 
-                foreach (var inputState in state.Value.InputStates.Values.OrderBy(inputState => inputState.Ordinal))
+                foreach (var inputState in InternInputStates(state.Name).Values.OrderBy(inputState => inputState.Ordinal))
                 {
                     var input = $"{ws}{ws}{p.Input}{inputState.Input}{p.Reset}";
 
-                    var inputOutcome = inputState.Status == InputStatus.Failed ? $"{p.Failed}Failed!{p.Reset}" : $"{p.Succeeded}Succeeded{p.Reset}";
+                    var inputOutcome = GetText(inputState.Status);
 
-                    var inputDuration = $"{(index < state.Value.InputStates.Count - 1 ? p.TreeFork : p.TreeCorner)}{p.Timing}{inputState.Duration.Humanize(true)}{p.Reset}";
+                    var inputDuration = $"{(index < InternInputStates(state.Name).Count - 1 ? p.TreeFork : p.TreeCorner)}{p.Timing}{inputState.Duration.Humanize(true)}{p.Reset}";
 
-                    var inputPercentage = totalDuration > TimeSpan.Zero
-                        ? $"{(index < state.Value.InputStates.Count - 1 ? p.TreeFork : p.TreeCorner)}{p.Timing}{100 * inputState.Duration.TotalMilliseconds / totalDuration.TotalMilliseconds:N1}%{p.Reset}"
+                    var inputPercentage = inputState.Duration.HasValue && totalDuration > TimeSpan.Zero
+                        ? $"{(index < InternInputStates(state.Name).Count - 1 ? p.TreeFork : p.TreeCorner)}{p.Timing}{100 * inputState.Duration.Value.TotalMilliseconds / totalDuration.TotalMilliseconds:N1}%{p.Reset}"
                         : "";
 
                     rows.Add(new SummaryRow { TargetOrInput = input, Outcome = inputOutcome, Duration = inputDuration, Percentage = inputPercentage });
@@ -259,7 +206,7 @@ namespace Bullseye.Internal
             await this.writer.WriteLineAsync($"{GetPrefix()}{p.Default}{"".Prp(tarW + 2 + outW + 2 + timW, p.Dash)}{p.Reset}").Tax();
 
             // header
-            await this.writer.WriteLineAsync($"{GetPrefix()}{rows[0].TargetOrInput.Prp(tarW, ws)}{ws}{ws}{rows[0].Outcome.Prp(outW, ws)}{ws}{ws}{rows[0].Duration.Prp(timW, ws)}").Tax();
+            await this.writer.WriteLineAsync($"{GetPrefix()}{rows[0].TargetOrInput.Prp(tarW, ws)}{ws}{ws}{rows[0].Outcome.Prp(outW, ws)}{ws}{ws}{rows[0].Duration.Prp(timW, ws)}{p.Reset}").Tax();
 
             // header separator
             await this.writer.WriteLineAsync($"{GetPrefix()}{p.Default}{"".Prp(tarW, p.Dash)}{p.Reset}{ws}{ws}{p.Default}{"".Prp(outW, p.Dash)}{p.Reset}{ws}{ws}{p.Default}{"".Prp(timW, p.Dash)}{p.Reset}").Tax();
@@ -274,36 +221,70 @@ namespace Bullseye.Internal
             await this.writer.WriteLineAsync($"{GetPrefix()}{p.Default}{"".Prp(tarW + 2 + outW + 2 + timW, p.Dash)}{p.Reset}").Tax();
         }
 
-        private string Message(string color, string text) => $"{GetPrefix()}{color}{text}{p.Reset}";
+        private string Message(string color, string text) =>
+            $"{GetPrefix()}{color}{text}{p.Reset}";
 
-        private string Message(Stack<string> targets, string color, string text) => $"{GetPrefix(targets)}{color}{text}{p.Reset}";
+        private string Message(IEnumerable<string> targets, string color, string text) =>
+            $"{GetPrefix(targets)}{color}{text}{p.Reset}";
 
-        private string Message(string color, string text, List<string> targets, TimeSpan? duration) =>
-            $"{GetPrefix()}{color}{text}{p.Reset} {p.Target}({targets.Spaced()}){p.Reset}{GetSuffix(false, duration)}{p.Reset}";
+        private string Message(string text, List<string> targets, TimeSpan? duration) =>
+            $"{GetPrefix()}{text} {p.Target}({targets.Spaced()}){p.Reset}{GetSuffix(false, duration)}";
 
-        private string Message(string color, string text, Target target) =>
-            $"{GetPrefix(target)}{color}{text}{p.Reset}";
+        private string Message(TargetState state) =>
+            $"{GetPrefix(state.Name)}{GetText(state.Status, state.Exception)}{GetSuffix(true, state.Duration)}";
 
-        private string Message(string color, string text, Target target, TimeSpan? duration) =>
-            $"{GetPrefix(target)}{color}{text}{p.Reset}{GetSuffix(true, duration)}{p.Reset}";
+        private string Message(InputState state) =>
+            $"{GetPrefix(state.TargetName, state.Input)}{GetText(state.Status, state.Exception)}{GetSuffix(true, state.Duration)}";
 
-        private string MessageWithInput<TInput>(string color, string text, Target target, TInput input) =>
-            $"{GetPrefix(target, input)}{color}{text}{p.Reset}";
+        private string Message(Target target, Exception ex) =>
+            $"{GetPrefix(target.Name)}{p.Failed}{ex}{p.Reset}";
 
-        private string MessageWithInput<TInput>(string color, string text, Target target, TInput input, TimeSpan? duration) =>
-            $"{GetPrefix(target, input)}{color}{text}{p.Reset}{GetSuffix(true, duration)}{p.Reset}";
+        private string Message(Target target, object input, Exception ex) =>
+            $"{GetPrefix(target.Name, input)}{p.Failed}{ex}{p.Reset}";
 
         private string GetPrefix() =>
             $"{p.Prefix}{prefix}:{p.Reset} ";
 
-        private string GetPrefix(Stack<string> targets) =>
+        private string GetPrefix(IEnumerable<string> targets) =>
             $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{string.Join($"{p.Default}/{p.Target}", targets.Reverse())}{p.Default}:{p.Reset} ";
 
-        private string GetPrefix(Target target) =>
-            $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{target.Name}{p.Default}:{p.Reset} ";
+        private string GetPrefix(string target) =>
+            $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{target}{p.Default}:{p.Reset} ";
 
-        private string GetPrefix<TInput>(Target target, TInput input) =>
-            $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{target.Name}{p.Default}/{p.Input}{input}{p.Default}:{p.Reset} ";
+        private string GetPrefix(string target, object input) =>
+            $"{p.Prefix}{prefix}:{p.Reset} {p.Target}{target}{p.Default}/{p.Input}{input}{p.Default}:{p.Reset} ";
+
+        private string GetText(TargetStatus? state, Exception ex = null)
+        {
+            switch (state)
+            {
+                case TargetStatus.NoInputs:
+                    return $"{p.Warning}No inputs!{p.Reset}";
+                case TargetStatus.Starting:
+                    return $"{p.Default}Starting...{p.Reset}";
+                case TargetStatus.Failed:
+                    return $"{p.Failed}Failed!{(ex != null ? $" {ex.Message}" : "")}{p.Reset}";
+                case TargetStatus.Succeeded:
+                    return $"{p.Succeeded}Succeeded{p.Reset}";
+                default:
+                    return default;
+            }
+        }
+
+        private string GetText(InputStatus state, Exception ex = null)
+        {
+            switch (state)
+            {
+                case InputStatus.Starting:
+                    return $"{p.Default}Starting...{p.Reset}";
+                case InputStatus.Failed:
+                    return $"{p.Failed}Failed!{(ex != null ? $" {ex.Message}" : "")}{p.Reset}";
+                case InputStatus.Succeeded:
+                    return $"{p.Succeeded}Succeeded{p.Reset}";
+                default:
+                    return default;
+            }
+        }
 
         private string GetSuffix(bool specific, TimeSpan? duration) =>
             (!specific && this.dryRun ? $" {p.Option}(dry run){p.Reset}" : "") +
@@ -313,28 +294,49 @@ namespace Bullseye.Internal
 
         private class TargetState
         {
-            public TargetState(int ordinal) => this.Ordinal = ordinal;
+            public TargetState(string name, TargetStatus? status, Exception exception, TimeSpan? duration, int ordinal)
+            {
+                this.Name = name;
+                this.Status = status;
+                this.Exception = exception;
+                this.Duration = duration;
+                this.Ordinal = ordinal;
+            }
+
+            public string Name { get; }
+
+            public TargetStatus? Status { get; }
+
+            public Exception Exception { get; }
+
+            public TimeSpan? Duration { get; }
 
             public int Ordinal { get; }
-
-            public TargetStatus Status { get; set; }
-
-            public TimeSpan? Duration { get; set; }
-
-            public ConcurrentDictionary<Guid, InputState> InputStates { get; } = new ConcurrentDictionary<Guid, InputState>();
         }
 
         private class InputState
         {
-            public InputState(int ordinal) => this.Ordinal = ordinal;
+            public InputState(string targetName, object input, InputStatus status, Exception exception, TimeSpan? duration, int ordinal)
+            {
+                this.TargetName = targetName;
+                this.Input = input;
+                this.Status = status;
+                this.Exception = exception;
+                this.Duration = duration;
+                this.Ordinal = ordinal;
+            }
+
+            public string TargetName { get; }
+
+            public object Input { get; }
+
+            public InputStatus Status { get; }
+
+            public Exception Exception { get; }
+
+            public TimeSpan? Duration { get; }
 
             public int Ordinal { get; }
-
-            public object Input { get; set; }
-
-            public InputStatus Status { get; set; }
-
-            public TimeSpan Duration { get; set; }
         }
 
         private class SummaryRow
@@ -351,12 +353,14 @@ namespace Bullseye.Internal
         private enum TargetStatus
         {
             NoInputs,
+            Starting,
             Failed,
             Succeeded,
         }
 
         private enum InputStatus
         {
+            Starting,
             Failed,
             Succeeded,
         }
